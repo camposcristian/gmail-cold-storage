@@ -1,0 +1,9 @@
+node_modules
+credentials.json
+token.json
+.archive-staging
+.DS_Store
+*.log
+.env
+*.db
+docs/plans/
