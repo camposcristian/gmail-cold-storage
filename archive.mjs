@@ -7,6 +7,7 @@ import { createStorage } from './lib/storage.mjs';
 import { createDb } from './lib/db.mjs';
 import { createGmailFetcher } from './lib/gmail.mjs';
 import { createImapFetcher } from './lib/imap.mjs';
+import { createOutlookFetcher } from './lib/outlook.mjs';
 import PostalMime from 'postal-mime';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,11 @@ function getConfig() {
       port: process.env.IMAP_PORT || '993',
       user: process.env.IMAP_USER,
       pass: process.env.IMAP_PASS,
+    },
+    outlook: {
+      user: process.env.OUTLOOK_USER,
+      tokenCachePath: process.env.OUTLOOK_TOKEN_PATH || './outlook-token.json',
+      mailbox: process.env.OUTLOOK_MAILBOX || 'INBOX',
     },
   };
 }
@@ -62,6 +68,13 @@ async function createFetcher(config) {
       tokenPath: config.gmail.tokenPath,
       scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
     });
+  }
+  if (config.fetcher === 'outlook') {
+    if (!config.outlook.user) {
+      console.error('⚠️  FETCHER=outlook requires OUTLOOK_USER (your Outlook.com/Hotmail address).');
+      process.exit(1);
+    }
+    return createOutlookFetcher(config.outlook);
   }
   return createImapFetcher(config.imap);
 }
