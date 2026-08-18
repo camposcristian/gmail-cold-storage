@@ -26,7 +26,7 @@ S3-compatible object storage is **50–100× cheaper** for the same data, and se
                                           └──────────────────┘
 ```
 
-1. Fetch old emails via IMAP (or Gmail API) as raw `.eml` — mime-preserving, attachments intact.
+1. Fetch old emails via IMAP, the Gmail API, or Outlook OAuth2 as raw `.eml` — mime-preserving, attachments intact.
 2. Upload each one to an S3-compatible bucket at `emails/gmail/YYYY/MM/<msgid>.eml`.
 3. Build a SQLite index with FTS5 full-text search (subject, from, to, snippet) for fast local search.
 4. Only after upload succeeds, optionally delete from Gmail (Gmail API mode only).
@@ -144,6 +144,16 @@ GOOGLE_CREDENTIALS_PATH=./credentials.json
 GOOGLE_TOKEN_PATH=./token.json
 ```
 
+**Outlook / Microsoft personal config (OAuth2 device-code)**
+
+```dotenv
+FETCHER=outlook
+OUTLOOK_USER=you@outlook.com
+OUTLOOK_TOKEN_PATH=./outlook-token.json   # cached token, auto-refreshed
+OUTLOOK_MAILBOX=INBOX
+EMAIL_PREFIX=emails/outlook               # keep providers in separate prefixes
+```
+
 ### 2. Get an app password for IMAP
 
 IMAP is the default and recommended mode — no OAuth dance, no API console. You need an **app password** (not your normal login password):
@@ -151,7 +161,7 @@ IMAP is the default and recommended mode — no OAuth dance, no API console. You
 - **Gmail**: go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), create one for "Mail". Use host `imap.gmail.com:993`.
   - Note: 2-Step Verification must be enabled on your Google account first.
 - **Fastmail**: Settings → Privacy & Security → App Passwords. Use host `imap.fastmail.com:993`.
-- **Outlook / Microsoft 365**: host `outlook.office365.com:993`, use your normal password (or app password if MFA is on).
+- **Outlook / Hotmail / Microsoft personal**: app passwords and basic auth are **dead** for personal Microsoft accounts — IMAP now requires OAuth2. Don't use the `imap` fetcher for these; use the dedicated `outlook` fetcher instead (see [Outlook / Microsoft personal mode](#outlook--microsoft-personal-mode) below).
 
 ### 3. Install dependencies
 
@@ -226,6 +236,52 @@ Setup:
    - `--archive` / dry-run / `--search` → `gmail.readonly`
    - `--delete-archived` → `https://mail.google.com/` (full access, required for `batchDelete`)
 4. First run opens a browser for the OAuth flow; `token.json` is saved for subsequent runs.
+
+---
+
+## Outlook / Microsoft personal mode
+
+For **Outlook.com / Hotmail / Live** (personal Microsoft accounts), Microsoft has
+**killed basic auth and app passwords** — IMAP now *requires* OAuth2. The plain
+`imap` fetcher will just fail to authenticate. Use `FETCHER=outlook` instead.
+
+This mode uses the **OAuth2 device-code flow**, so it works headless and never
+handles your password:
+
+1. Set in `.env`:
+   ```dotenv
+   FETCHER=outlook
+   OUTLOOK_USER=you@outlook.com
+   EMAIL_PREFIX=emails/outlook
+   ```
+2. Run any command (`node archive.mjs`, `--archive`, etc.). On first run it prints:
+   ```
+   🔐 Microsoft sign-in required:
+
+   To sign in, use a web browser to open https://microsoft.com/devicelogin
+   and enter the code XXXXXXXX to authenticate.
+   ```
+3. Open that URL on any device, enter the code, approve access. Archiving then
+   proceeds automatically.
+4. The token (access + refresh) is cached to `OUTLOOK_TOKEN_PATH`
+   (`./outlook-token.json` by default) and **refreshed silently** on later runs
+   and mid-archive, so long archives don't break at the ~60 min token expiry.
+
+Details:
+- **Client**: uses Thunderbird's public `client_id`
+  (`9e5f94bc-e8a4-4e73-b8be-63364c29d753`), which is approved for personal
+  accounts and the `IMAP.AccessAsUser.All` scope — **no Azure app registration
+  of your own is needed**.
+- **Authority**: `login.microsoftonline.com/consumers` (personal accounts).
+- **IMAP**: `outlook.office365.com:993`, SASL `XOAUTH2`.
+- **Non-destructive**: same as every other mode — mailboxes are opened
+  **read-only** and messages fetched with `BODY.PEEK[]`, so nothing is marked
+  read or modified.
+- `--delete-archived` is **not** supported for Outlook (read-only by design);
+  delete from your mailbox via your own client if you want.
+
+Everything downstream (raw `.eml` upload, `index.db` shape, search, rebuild) is
+identical to the Gmail path — the viewer reads an Outlook archive unchanged.
 
 ---
 
